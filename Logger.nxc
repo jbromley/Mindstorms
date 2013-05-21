@@ -1,0 +1,145 @@
+/*
+ * Logger.nxc
+ * Simple logging facility for Mindstorms NXC programs.
+ */
+
+byte handle = 0;
+bool logging = true;
+
+
+/**
+ * Reports an error code to the NXT screen.
+ * @param desc a brief description of the error
+ * @param err_code the error code from the Loader module.
+ */
+void report_error(string desc) 
+{
+     TextOut(0, LCD_LINE1, desc);
+     PlayTone(TONE_C6, 1000);
+     Wait(SEC_5);
+}
+
+/**
+ * Sets the size of the log file.
+ * @param bytes the length of the log file in bytes.
+ */
+void set_log_size(unsigned long bytes)
+{
+     set_fopen_size(bytes);
+}
+
+/**
+ * Opens a file for writing and allocates the given number of
+ * bytes.
+ * @param filename the name of the file to write.
+ * @param filesize the number of bytes to allocate for the file.
+ */
+void open_log(string filename) 
+{
+     if (!logging) { return; }
+		
+     remove(filename);
+     handle = fopen(filename, "w");
+     if (handle == NULL) {
+	  string err_msg;
+	  sprintf(err_msg, "Can't open %s", filename);
+	  report_error(err_msg);
+	  Stop(true);
+     }
+
+     fprintf(handle, "%d : log opened.\n", CurrentTick());
+}
+
+void write_log_string(string msg) 
+{
+     if (!logging) { return; }
+
+     fprintf(handle, "%d : ", CurrentTick());
+     fprintf(handle, "%s", msg);
+     fputc('\n', handle);
+}
+
+void write_log_byte(byte b) 
+{
+     if (!logging) { return; }
+		
+     fprintf(handle, "%d : ", CurrentTick());
+     fprintf(handle, "%0x\n", b);
+}
+
+void write_log_bytes(byte b[]) {
+     int elems;
+     int i;
+     string msg = "";
+     string byte_str = "";
+
+     if (!logging) { return; }
+	
+     elems = SizeOf(b);
+	
+     for (i = 0; i < elems; ++i) {
+	  sprintf(byte_str, " %0x", b[i]);
+	  strcat(msg, byte_str);
+     }
+
+     fprintf(handle, "%d :", CurrentTick());
+     fprintf(handle, "%s\n", msg);
+}
+
+void write_log_value(string name, int value) {
+     if (!logging) { return; }
+	
+     fprintf(handle, "%d : ", CurrentTick());
+     fprintf(handle, "%s = ", name);
+     fprintf(handle, "%d\n", value);
+}
+
+void write_log_value_2(string msg, int value1, int value2)
+{
+     if (!logging) { return; }
+     
+     fprintf(handle, "%d : ", CurrentTick());
+     fprintf(handle, "%s = ", msg);
+     fprintf(handle, "%d, ", value1);
+     fprintf(handle, "%d\n", value2);
+}
+
+void write_log_values(string names[], int values[])
+{
+     int num_values = 0;
+     int i;
+     string msg = "";
+     string name_value = "";
+     string value_str = "";
+
+     if (!logging) { return; }
+
+     if (SizeOf(names) < SizeOf(values)) {
+	  num_values = SizeOf(names);
+     } else {
+	  num_values = SizeOf(values);
+     }
+
+     for (i = 0; i < num_values; ++i) {
+	  sprintf(name_value, " %s = ", names[i]);
+	  sprintf(value_str, "%d", values[i]);
+	  strcat(name_value, value_str);
+	  if (i < num_values - 1) {
+	       strcat(name_value, ",");
+	  }
+	  strcat(msg, name_value);
+     }
+
+     fprintf(handle, "%d :", CurrentTick());
+     fprintf(handle, "%s\n", msg);
+}
+
+void close_log() {
+     if (!logging) { return; }
+		
+     fprintf(handle, "%d : log closed.\n", CurrentTick());
+	
+     fclose(handle);
+     handle = 0;
+     logging = false;
+}

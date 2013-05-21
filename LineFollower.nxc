@@ -1,0 +1,144 @@
+/* 
+ * LineFollower.nxc
+ * Follow a line using a PID algorithm.
+ */
+#define LIGHT_PORT S1
+#define LIGHT_VALUE SENSOR_1
+#define MAX_POWER 100.0
+#define TARGET_POWER 50.0
+#define DT 0.0008
+#define PC 0.5
+
+/* Logging */
+#include "Logger.nxc"
+#define LOG_FILE "lf.log"
+
+/* Calibration variables */
+int lowest = 2000;
+int highest = -2000;
+int calibration_sem = 0;
+
+inline int min(int v1, int v2) {
+     return (v1 < v2) ? v1 : v2;
+}
+
+inline int max(int v1, int v2) {
+     return (v1 > v2) ? v1 : v2;
+}
+
+task read_light_sensor() {
+     int sensor_value = 0;
+
+     while (calibration_sem == 1) {
+	  sensor_value = LIGHT_VALUE;
+	  lowest = min(lowest, sensor_value);
+	  highest = max(highest, sensor_value);
+	  NumOut(0, LCD_LINE1, sensor_value);
+     }
+}
+
+void auto_calibrate() {
+     OnFwdSync(OUT_AC, 100, 100);
+     Wait(MS_500);
+
+     calibration_sem = 1;
+     StartTask(read_light_sensor);
+     OnFwdSync(OUT_AC, 25, -100);
+     Wait(4500);
+     calibration_sem = 0;
+
+     OnFwdSync(OUT_AC, 100, 100);
+     Wait(MS_400);
+     Off(OUT_AC);
+     Float(OUT_AC);
+}
+
+void manual_calibrate() {
+     while (!ButtonPressed(BTNLEFT, false)) {
+	  int sensor_value = LIGHT_VALUE;
+	  lowest = min(lowest, sensor_value);
+	  highest = max(highest, sensor_value);
+	  NumOut(0, LCD_LINE1, lowest);
+	  NumOut(0, LCD_LINE2, sensor_value);
+	  NumOut(0, LCD_LINE3, highest);
+     }
+}
+
+task main() {
+     logging = true;
+     set_log_size(16384);
+     open_log(LOG_FILE);
+
+     SetSensorType(LIGHT_PORT, SENSOR_TYPE_LIGHT_ACTIVE);
+     /* SetSensorMode(LIGHT_PORT, SENSOR_MODE_RAW); */
+     SetSensorMode(LIGHT_PORT, SENSOR_MODE_PERCENT);
+     ResetSensor(LIGHT_PORT);
+
+     /* Calibration. Try both automatic and manual. */
+     write_log_string("automatic calibration");
+     auto_calibrate();
+     write_log_value_2("l, h = ", lowest, highest);
+
+     /* Manual calibration */
+     write_log_string("manual calibration");
+     manual_calibrate();
+     write_log_value_2("l, h = ", lowest, highest);
+
+     /* Find the offset and show it. */
+     int offset = (lowest + highest) / 2;
+     float half_range = (highest - lowest) / 2.0;
+
+     /* Calculate Kp and Ki. */
+     int tp = TARGET_POWER;
+     float kp = (MAX_POWER - tp) / half_range;
+     float ki = 2.0 * kp * DT / PC;
+     float kd = kp * PC / (8.0 * DT);
+
+     NumOut(0, LCD_LINE1, offset);
+     NumOut(0, LCD_LINE2, half_range);
+     NumOut(0, LCD_LINE3, kp);
+     NumOut(0, LCD_LINE4, ki);
+     until(ButtonPressed(BTNCENTER, false));
+
+     /* Loop time calculation */
+     unsigned long start_tick;
+     unsigned long loops = 0;
+
+     /* Main driving loop */
+     int integral = 0;
+     int last_error = 0;
+     int derivative = 0;
+
+     start_tick = CurrentTick();
+     while (!ButtonPressed(BTNRIGHT, false)) {
+	  int sensor_value = LIGHT_VALUE;
+	  int error = sensor_value - offset;
+	  integral = integral + error;
+	  derivative = error - last_error;
+	  float turn = kp * error + ki * integral + kd * derivative;
+	  /* NumOut(0, LCD_LINE6, error); */
+	  /* NumOut(0, LCD_LINE7, integral); */
+	  /* NumOut(0, LCD_LINE8, turn); */
+	  int power_a = tp - turn;
+	  int power_c = tp + turn;
+	  if (power_a > 0) {
+	       OnFwd(OUT_A, power_a);
+	  } else {
+	       OnRev(OUT_A, -1 * power_a);
+	  }
+	  if (power_c > 0) {
+	       OnFwd(OUT_C, power_c);
+	  } else {
+	       OnRev(OUT_C, -1 * power_c);
+	  }
+	  last_error = error;
+	  ++loops;
+     }
+     unsigned long ticks = start_tick - CurrentTick();
+     write_log_value_2("ticks, loops = ", ticks, loops);
+
+     Off(OUT_AC);
+     close_log();
+     Wait(SEC_5);
+}
+

@@ -1,0 +1,32 @@
+/* BumpWander.nxc */
+#define BUMPER_PORT S1
+#define BUMPER SENSOR_1
+
+mutex motorMutex;
+
+task Move() {
+    while (true) {
+        Acquire(motorMutex);
+        OnFwdSync(OUT_AC, 75, 0);
+        Release(motorMutex);
+        Wait(500);
+    }
+}
+
+task WatchBumper() {
+    while (true) {
+        if (BUMPER) {
+            // Sensor is pressed, back up and turn.
+            Acquire(motorMutex);
+            OnRev(OUT_A, 40 + Random(60));
+            OnRev(OUT_C, 60 + Random(40));
+            Wait(500 + Random(1000));
+            Release(motorMutex);
+        }
+    }
+}
+
+task main() {
+    SetSensorTouch(BUMPER_PORT);
+    Precedes(WatchBumper, Move);
+}
