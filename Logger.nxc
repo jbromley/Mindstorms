@@ -94,14 +94,25 @@ void write_log_value(string name, int value) {
      fprintf(handle, "%d\n", value);
 }
 
-void write_log_value_2(string msg, int value1, int value2)
+void write_log_value_2(string msg, int v1, int v2)
 {
      if (!logging) { return; }
      
      fprintf(handle, "%d : ", CurrentTick());
      fprintf(handle, "%s = ", msg);
-     fprintf(handle, "%d, ", value1);
-     fprintf(handle, "%d\n", value2);
+     fprintf(handle, "%d, ", v1);
+     fprintf(handle, "%d\n", v2);
+}
+
+void write_log_value_3(string msg, int v1, int v2, int v3)
+{
+     if (!logging) { return; }
+     
+     fprintf(handle, "%d : ", CurrentTick());
+     fprintf(handle, "%s = ", msg);
+     fprintf(handle, "%d, ", v1);
+     fprintf(handle, "%d, ", v2);
+     fprintf(handle, "%d\n", v3);
 }
 
 void write_log_values(string names[], int values[])
