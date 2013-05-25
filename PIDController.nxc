@@ -1,0 +1,98 @@
+/*
+ * PIDController.nxc
+ */
+
+struct pid_controller_t {
+     float kp;
+     float ki;
+     float kd;
+     int mv_max;
+     int mv_min;
+     int low_limit;
+     int previous_error;
+     int dt;
+     unsigned long cycle_time;
+     int setpoint;
+     /* int error; */
+     int integral;
+     /* float derivative; */
+     int integral_max;
+     int integral_min;
+     bool limit_integral;
+     bool disable_integral;
+     int delay_ms;
+     int cycle_count;
+     int pv;
+};
+
+void pid_controller_init(pid_controller_t& self, int setpoint, int delay_ms)
+{
+     self.kp = 1.0;
+     self.ki = 0.0;
+     self.kd = 0.0;
+     self.mv_max = 100;
+     self.mv_min = -self.mv_max;
+     self.previous_error = 0;
+     self.dt = 0;
+     self.cycle_time = 0;
+     self.setpoint = setpoint;
+     self.integral = 0;
+     self.integral_max = 0;
+     self.integral_min = 0;
+     self.limit_integral = false;
+     self.disable_integral = false;
+     self.delay_ms = delay_ms;
+     self.cycle_count = 0;
+}
+
+int pid_controller_do_pid(pid_controller_t& self, int pv)
+{
+     int output_mv;
+
+     self.pv = pv;
+
+     if (self.cycle_time == 0) {
+	  self.cycle_time = CurrentTick();
+	  return 0;
+     }
+
+     int error = self.setpoint - pv;
+     if (!self.disable_integral) {
+	  self.integral += self.ki * error * self.dt;
+     }
+     if (self.limit_integral) {
+	  if (self.integral > self.integral_max) {
+	       self.integral = self.integral_max;
+	  } else if (self.integral < self.integral_min) {
+	       self.integral = self.integral_min;
+	  }
+     }
+     float derivative = (1.0 * error - self.previous_error) / self.dt;
+     output_mv = self.kp * error + self.integral + self.kd * derivative;
+
+     if (output_mv > self.mv_max) {
+	  output_mv = self.mv_max;
+     } else if (output_mv < self.mv_min) {
+	  output_mv = self.mv_min;
+     }
+
+     self.previous_error = error;
+
+     /* Delay the difference of desired cycle time and actual cycle time. */
+     if (self.delay_ms > 0) {
+	  int delay = self.delay_ms - (CurrentTick() - self.cycle_time);
+	  if (delay > 0) {
+	       Wait(delay);
+	  }
+     }
+
+     self.cycle_count += 1;
+     self.dt = CurrentTick() - self.cycle_time;
+     self.cycle_time = CurrentTick();
+	  
+     return output_mv;
+}
+
+task main()
+{
+}
