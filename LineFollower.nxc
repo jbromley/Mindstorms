@@ -4,8 +4,7 @@
  */
 #define LIGHT_PORT S1
 #define LIGHT_VALUE SENSOR_1
-#define MAX_POWER 100.0
-#define TARGET_POWER 50.0
+#define TARGET_POWER 75.0
 #define DT 0.0008
 #define PC 0.5
 
@@ -17,6 +16,27 @@
 int lowest = 2000;
 int highest = -2000;
 int calibration_sem = 0;
+
+/* 
+ * PID constants
+ * We use Ziegler-Nichols to tune the PID.  
+ * 1) Adjust k_p until the system oscillates but follows the
+ * line. This gives k_c. Measure oscillation time P_c and loop time DT.
+ * 2) Set k_p = 0.60 * k_c,
+ *        k_i = 2.0 * k_p * DT / P_c,
+ *        k_d = k_p * P_c / (8.0 * DT)
+ */
+float kp = 0.192;
+float ki = 0.00034;
+float kd = 0.0;
+
+/* Parameters for 50% target power. */
+/* float kp = 0.18; */
+/* float ki = 0.0004; */
+/* float kd = 0.0035; */
+
+
+byte run_sem = 0;
 
 inline int min(int v1, int v2) {
      return (v1 < v2) ? v1 : v2;
@@ -33,7 +53,6 @@ task read_light_sensor() {
 	  sensor_value = LIGHT_VALUE;
 	  lowest = min(lowest, sensor_value);
 	  highest = max(highest, sensor_value);
-	  NumOut(0, LCD_LINE1, sensor_value);
      }
 }
 
@@ -54,6 +73,8 @@ void auto_calibrate() {
 }
 
 void manual_calibrate() {
+     TextOut(0, LCD_LINE4, "< to end.");
+
      while (!ButtonPressed(BTNLEFT, false)) {
 	  int sensor_value = LIGHT_VALUE;
 	  lowest = min(lowest, sensor_value);
@@ -62,43 +83,64 @@ void manual_calibrate() {
 	  NumOut(0, LCD_LINE2, sensor_value);
 	  NumOut(0, LCD_LINE3, highest);
      }
+
+     TextOut(0, LCD_LINE1, " ", DRAW_OPT_CLEAR_WHOLE_SCREEN);
+}
+
+task adjust_kp() {
+     bool leftPressed = false;
+     bool rightPressed = false;
+
+     string s = "kp = " + FormatNum("%4.2f", kp);
+     TextOut(0, LCD_LINE1, s);
+
+     while (run_sem == 1) {
+	  if (ButtonPressed(BTNLEFT, false)) {
+	       if (!leftPressed) {
+		    leftPressed = true;
+		    kp -= 0.01;
+	       }
+	  } else {
+	       leftPressed = false;
+	  }
+
+	  if (ButtonPressed(BTNRIGHT, false)) {
+	       if (!rightPressed) {
+		    rightPressed = true;
+		    kp += 0.01;
+	       }
+	  } else {
+	       rightPressed = false;
+	  }
+
+	  if (leftPressed || rightPressed) {
+	       s = "kp = " + FormatNum("%4.2f", kp);
+	       TextOut(0, LCD_LINE1, s);
+	  }
+     }
 }
 
 task main() {
      logging = true;
-     set_log_size(16384);
+     set_log_size(32767);
      open_log(LOG_FILE);
 
      SetSensorType(LIGHT_PORT, SENSOR_TYPE_LIGHT_ACTIVE);
-     /* SetSensorMode(LIGHT_PORT, SENSOR_MODE_RAW); */
-     SetSensorMode(LIGHT_PORT, SENSOR_MODE_PERCENT);
+     SetSensorMode(LIGHT_PORT, SENSOR_MODE_RAW);
      ResetSensor(LIGHT_PORT);
-
-     /* Calibration. Try both automatic and manual. */
-     write_log_string("automatic calibration");
-     auto_calibrate();
-     write_log_value_2("l, h = ", lowest, highest);
 
      /* Manual calibration */
      write_log_string("manual calibration");
      manual_calibrate();
      write_log_value_2("l, h = ", lowest, highest);
+     Wait(250);
 
-     /* Find the offset and show it. */
-     int offset = (lowest + highest) / 2;
-     float half_range = (highest - lowest) / 2.0;
-
-     /* Calculate Kp and Ki. */
+     /* Find the set point and show it. */
+     int set_point = (lowest + highest) / 2;
      int tp = TARGET_POWER;
-     float kp = (MAX_POWER - tp) / half_range;
-     float ki = 2.0 * kp * DT / PC;
-     float kd = kp * PC / (8.0 * DT);
 
-     NumOut(0, LCD_LINE1, offset);
-     NumOut(0, LCD_LINE2, half_range);
-     NumOut(0, LCD_LINE3, kp);
-     NumOut(0, LCD_LINE4, ki);
-     until(ButtonPressed(BTNCENTER, false));
+     /* Log the PID constant values. */
+     write_log_value_3("kp, ki, kd = ", kp, ki, kd);
 
      /* Loop time calculation */
      unsigned long start_tick;
@@ -109,33 +151,33 @@ task main() {
      int last_error = 0;
      int derivative = 0;
 
+     /* Start the k_p adjusting task. */
+     run_sem = 1;
+     StartTask(adjust_kp);
+
      start_tick = CurrentTick();
-     while (!ButtonPressed(BTNRIGHT, false)) {
+     while (!ButtonPressed(BTNCENTER, false)) {
 	  int sensor_value = LIGHT_VALUE;
-	  int error = sensor_value - offset;
+	  int error = sensor_value - set_point;
 	  integral = integral + error;
 	  derivative = error - last_error;
 	  float turn = kp * error + ki * integral + kd * derivative;
-	  /* NumOut(0, LCD_LINE6, error); */
-	  /* NumOut(0, LCD_LINE7, integral); */
-	  /* NumOut(0, LCD_LINE8, turn); */
+
 	  int power_a = tp - turn;
 	  int power_c = tp + turn;
-	  if (power_a > 0) {
-	       OnFwd(OUT_A, power_a);
-	  } else {
-	       OnRev(OUT_A, -1 * power_a);
-	  }
-	  if (power_c > 0) {
-	       OnFwd(OUT_C, power_c);
-	  } else {
-	       OnRev(OUT_C, -1 * power_c);
-	  }
+	  OnFwd(OUT_A, power_a);
+	  OnFwd(OUT_C, power_c);
+
 	  last_error = error;
 	  ++loops;
+
+	  if (loops == 1000) {
+	       unsigned long ticks = CurrentTick() - start_tick;
+	       write_log_value_2("ticks, loops = ", ticks, loops);
+	  }
      }
-     unsigned long ticks = start_tick - CurrentTick();
-     write_log_value_2("ticks, loops = ", ticks, loops);
+     
+     run_sem = 0;
 
      Off(OUT_AC);
      close_log();
