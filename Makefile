@@ -1,5 +1,5 @@
 COMPILE = /usr/local/bin/nbc
-NBCFLAGS = -EF -Z2 -q
+NBCFLAGS = -q -EF -Z2
 DOWNLOAD = /usr/local/bin/nbc -S=usb -d -b
 
 BumpWanderer: BumpWanderer.nxc
@@ -15,4 +15,3 @@ LineFollower.rxe: LineFollower.nxc
 
 clean: 
 	rm -f *~ *.sym *.rxe *.log
-
