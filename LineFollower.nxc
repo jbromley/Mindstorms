@@ -3,14 +3,21 @@
  * Follow a line using a PID algorithm.
  */
 #define LIGHT_PORT S1
+#define ULTRASONIC_PORT S4
+
 #define LIGHT_VALUE SENSOR_1
+
 #define TARGET_POWER 75.0
 #define DT 0.0008
 #define PC 0.5
 
+#define MINIMUM_DISTANCE 30
+
 /* Logging */
 #include "Logger.nxc"
 #define LOG_FILE "lf.log"
+
+mutex motorMutex;
 
 /* Calibration variables */
 int lowest = 2000;
@@ -120,6 +127,29 @@ task adjust_kp() {
      }
 }
 
+task watch_ultrasonic() {
+    bool obstructed = FALSE;
+
+    while (true) {
+	int dist = SensorUS(ULTRASONIC_PORT);
+	if (dist < MINIMUM_DISTANCE) {
+	    if (obstructed != TRUE) {
+		Acquire(motorMutex);
+		obstructed = TRUE;
+		PlayTone(TONE_C5, 250);
+		Off(OUT_AC);
+	    }
+	} else {
+	    if (obstructed == TRUE) {
+		obstructed = FALSE;
+		PlayTone(TONE_C4, 250);
+		Release(motorMutex);
+	    }
+	}
+	Wait(50);
+    }
+}
+
 task main() {
      logging = true;
      set_log_size(32767);
@@ -128,6 +158,8 @@ task main() {
      SetSensorType(LIGHT_PORT, SENSOR_TYPE_LIGHT_ACTIVE);
      SetSensorMode(LIGHT_PORT, SENSOR_MODE_RAW);
      ResetSensor(LIGHT_PORT);
+
+     SetSensorLowspeed(ULTRASONIC_PORT);
 
      /* Manual calibration */
      write_log_string("manual calibration");
@@ -154,6 +186,8 @@ task main() {
      /* Start the k_p adjusting task. */
      run_sem = 1;
      StartTask(adjust_kp);
+     
+     StartTask(watch_ultrasonic);
 
      start_tick = CurrentTick();
      while (!ButtonPressed(BTNCENTER, false)) {
@@ -165,8 +199,10 @@ task main() {
 
 	  int power_a = tp - turn;
 	  int power_c = tp + turn;
+	  Acquire(motorMutex);
 	  OnFwd(OUT_A, power_a);
 	  OnFwd(OUT_C, power_c);
+	  Release(motorMutex);
 
 	  last_error = error;
 	  ++loops;
@@ -176,6 +212,9 @@ task main() {
 	       write_log_value_2("ticks, loops = ", ticks, loops);
 	  }
      }
+
+     StopTask(watch_ultrasonic);
+     StopTask(adjust_kp);
      
      run_sem = 0;
 
